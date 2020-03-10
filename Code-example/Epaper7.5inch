@@ -1,0 +1,293 @@
+/* Includes ------------------------------------------------------------------*/
+#include "DEV_Config.h"
+#include "EPD.h"
+#include "GUI_Paint.h"
+#include <stdlib.h>
+#include "WiFi.h"
+#include <PubSubClient.h> 
+UBYTE *BlackImage;
+
+//------------------------------------------------------------  WiFi --------------------------------------------------------------------------
+const char* ssid = "OPPO A83(2018)";
+const char* password = "12345678";
+WiFiClient wifiClient;
+//-------------------------------------------------- MQTT -------------------------------------------------------------------
+#define SERVER          "io.adafruit.com"
+#define SERVERPORT      1883
+#define MQTT_USERNAME   "thantawat"
+#define MQTT_KEY        "aio_nDds37vtAC464GbryPuA6sQuPsTN"
+PubSubClient client(wifiClient);
+String LPGtext,COtext,Smoketext,Temptext,Humitext,Data;
+unsigned char LPGval[50];
+unsigned char Smokeval[50];
+unsigned char COval[50];
+unsigned char Tempval[50];
+unsigned char Humival[50];
+
+void setup()
+{
+  printf("EPD_7IN5_test Demo\r\n");
+  DEV_Module_Init();
+
+  printf("e-Paper Init and Clear...\r\n");
+  EPD_7IN5_Init();
+  EPD_7IN5_Clear();
+  DEV_Delay_ms(500);
+
+  //Create a new image cache
+
+  /* you have to edit the startup_stm32fxxx.s file and set a big enough heap size */
+  UWORD Imagesize = ((EPD_7IN5_WIDTH % 8 == 0) ? (EPD_7IN5_WIDTH / 8 ) : (EPD_7IN5_WIDTH / 8 + 1)) * EPD_7IN5_HEIGHT;
+  if ((BlackImage = (UBYTE *)malloc(Imagesize)) == NULL) {
+    printf("Failed to apply for black memory...\r\n");
+    while (1);
+  }
+  printf("Paint_NewImage\r\n");
+  Paint_NewImage(BlackImage, EPD_7IN5_WIDTH, EPD_7IN5_HEIGHT, 0, WHITE);//(image,width,height,rotate,Color)
+
+#if 0   // show image for array   
+  printf("show image for array\r\n");
+  Paint_SelectImage(BlackImage);            //(image)ไม่มีตั้งค่าเหมือน paint_new
+  Paint_Clear(WHITE);                      //(Color) เติมสีทั้งจอ
+  Paint_DrawBitMap(gImage_7in5);           //แสดงรูปจาก image buffer
+  EPD_7IN5_Display(BlackImage);            //(image)
+  DEV_Delay_ms(500);
+#endif
+
+#if 0   // Drawing on the image
+  //1.Select Image
+  printf("SelectImage:BlackImage\r\n");
+  Paint_SelectImage(BlackImage);
+  Paint_Clear(WHITE);
+
+  // 2.Drawing on the image
+  printf("Drawing:BlackImage\r\n");
+  Paint_DrawPoint(10, 80, BLACK, DOT_PIXEL_1X1, DOT_STYLE_DFT);   //(x,y,color,size,style)
+  Paint_DrawPoint(10, 90, BLACK, DOT_PIXEL_2X2, DOT_STYLE_DFT);   
+  Paint_DrawPoint(10, 100, BLACK, DOT_PIXEL_3X3, DOT_STYLE_DFT);
+  Paint_DrawLine(20, 70, 70, 120, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID); //(xs,ys,xe,ye,color,width,style)
+  Paint_DrawLine(70, 70, 20, 120, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+  Paint_DrawRectangle(20, 70, 70, 120, BLACK, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);  //(xs,ys,xe,ye,color,width,style)
+  Paint_DrawRectangle(80, 70, 130, 120, BLACK, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawCircle(45, 95, 20, BLACK, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);          //(xc,yc,r,color,width,style)
+  Paint_DrawCircle(105, 95, 20, WHITE, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawLine(85, 95, 125, 95, BLACK, DOT_PIXEL_1X1, LINE_STYLE_DOTTED);
+  Paint_DrawLine(105, 75, 105, 115, BLACK, DOT_PIXEL_1X1, LINE_STYLE_DOTTED);
+  Paint_DrawString_EN(10, 0, "waveshare", &Font16, BLACK, WHITE);               //(Xstart, Ystart,String,Font,Color_Foreground,Color_Background)
+  Paint_DrawString_EN(10, 20, "hello world", &Font12, WHITE, BLACK);
+  Paint_DrawNum(10, 33, 123456789, &Font12, BLACK, WHITE);                      //(Xpoint,Ypoint,Nummber,Font,Color_Foreground, Color_Background)
+  Paint_DrawNum(10, 50, 987654321, &Font16, WHITE, BLACK);
+  Paint_DrawString_CN(130, 0, " 你好abc", &Font12CN, BLACK, WHITE);  //chinese
+  Paint_DrawString_CN(130, 20, "微雪电子", &Font24CN, WHITE, BLACK);
+
+  printf("EPD_Display\r\n");
+  EPD_7IN5_Display(BlackImage);
+  DEV_Delay_ms(2000);
+#endif
+
+  printf("Clear...\r\n");
+  EPD_7IN5_Clear();
+
+   WiFi.mode(WIFI_STA);
+   setup_wifi();
+   client.setServer(SERVER,SERVERPORT);
+   client.setCallback(callback);   
+   while (!client.connected()) 
+   {
+    Serial.println("Connecting to MQTT...");
+ 
+    if (client.connect("ESP32Epaper", MQTT_USERNAME, MQTT_KEY) ) 
+    {
+ 
+      Serial.println("connected");  
+ 
+    } else {
+ 
+      Serial.print("failed with state ");
+      Serial.print(client.state());
+      delay(2000);
+ 
+    }
+   }  
+    client.subscribe("thantawat/feeds/lpg");
+    client.subscribe("thantawat/feeds/co");
+    client.subscribe("thantawat/feeds/smoke");
+    client.subscribe("thantawat/feeds/temperature");
+    client.subscribe("thantawat/feeds/humidity");   
+}
+
+void loop()
+{ 
+ client.loop();
+  while (!client.connected()) 
+   {
+    Serial.println("Connecting to MQTT...");
+ 
+    if (client.connect("ESP32Epaper", MQTT_USERNAME, MQTT_KEY) ) 
+    {
+    Serial.println("connected");  
+    client.subscribe("thantawat/feeds/lpg");
+    client.subscribe("thantawat/feeds/co");
+    client.subscribe("thantawat/feeds/smoke");
+    client.subscribe("thantawat/feeds/temperature");
+    client.subscribe("thantawat/feeds/humidity");
+ 
+    } else {
+ 
+      Serial.print("failed with state ");
+      Serial.print(client.state());
+      delay(2000);
+    }
+   } 
+   
+ if((LPGtext != "")&&(COtext != "")&&(Smoketext != "")&&(Temptext !="")&&(Humitext != ""))
+    { 
+      Serial.println("LPG= " + LPGtext +" CO= " + COtext +" Smoketext= " + Smoketext +" Temp= " + Temptext +" Humi= "+ Humitext);
+      
+      int LPGsize=sizeof(LPGtext);
+     for(int a=0;a<=LPGsize;a++)
+        {
+            LPGval[a]=LPGtext[a];           
+        }
+      
+      int COsize=sizeof(COtext);
+     for(int b=0;b<=COsize;b++)
+        {
+            COval[b]=COtext[b];           
+        }
+      
+      int Smokesize=sizeof(Smoketext);
+     for(int c=0;c<=Smokesize;c++)
+        {
+            Smokeval[c]=Smoketext[c];           
+        }
+      
+      int Tempsize=sizeof(Temptext);
+     for(int d=0;d<=Tempsize;d++)
+        {
+            Tempval[d]=Temptext[d];           
+        }
+     
+      int Humisize=sizeof(Humitext);
+     for(int e=0;e<=Humisize;e++)
+        {
+            Humival[e]=Humitext[e];           
+        }
+      Epaper();
+    }
+}
+
+void setup_wifi() 
+{
+  delay(10);
+  // We start by connecting to a WiFi network
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED)
+  { 
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("WiFi connected - ESP IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void Epaper()
+{
+  printf("Start loop");   
+
+  /*printf("EPD_7IN5_test Demo\r\n");
+  DEV_Module_Init();
+
+  printf("e-Paper Init and Clear...\r\n");
+  EPD_7IN5_Init();
+  EPD_7IN5_Clear();
+  DEV_Delay_ms(500);*/
+
+  //Create a new image cache
+ // UBYTE *BlackImage;
+  /* you have to edit the startup_stm32fxxx.s file and set a big enough heap size */
+  /*UWORD Imagesize = ((EPD_7IN5_WIDTH % 8 == 0) ? (EPD_7IN5_WIDTH / 8 ) : (EPD_7IN5_WIDTH / 8 + 1)) * EPD_7IN5_HEIGHT;
+  if ((BlackImage = (UBYTE *)malloc(Imagesize)) == NULL) {
+    printf("Failed to apply for black memory...\r\n");
+    while (1);
+  }
+  printf("Paint_NewImage\r\n");
+  Paint_NewImage(BlackImage, EPD_7IN5_WIDTH, EPD_7IN5_HEIGHT, 0, WHITE);//(image,width,height,rotate,Color)
+  */
+
+#if 1
+      //printf("SelectImage:BlackImage\r\n");      
+      //Paint_SelectImage(BlackImage);
+      printf("Clear...\r\n");
+      EPD_7IN5_Clear();
+      
+      Paint_Clear(WHITE);
+      
+      Paint_DrawString_EN(0,0, " ", &kmuttlogo, WHITE, BLACK);
+      Paint_DrawString_EN(525,0, " ", &kmuttenglogo, WHITE, BLACK);
+      Paint_DrawString_EN(125,50, "Smart Fire Alarm System", &Font24, WHITE, BLACK); 
+       
+      Paint_DrawString_EN(100,150,"LPG = ", &Font24, WHITE, BLACK);
+      Paint_DrawString_var(338,150,LPGval, &Font24, WHITE, BLACK);
+      Paint_DrawString_EN(474,150," ppm", &Font24, WHITE, BLACK);
+      
+      Paint_DrawString_EN(100,175, "CO = ", &Font24, WHITE, BLACK);
+      Paint_DrawString_var(338,175,COval, &Font24, WHITE, BLACK);
+      Paint_DrawString_EN(474,175," ppm", &Font24, WHITE, BLACK);
+      
+      Paint_DrawString_EN(100,200, "Smoke = ", &Font24, WHITE, BLACK);
+      Paint_DrawString_var(338,200,Smokeval, &Font24, WHITE, BLACK);
+      Paint_DrawString_EN(474,200," ppm", &Font24, WHITE, BLACK);
+      
+      Paint_DrawString_EN(100,225, "Temperature = ", &Font24, WHITE, BLACK);
+      Paint_DrawString_var(338,225,Tempval, &Font24, WHITE, BLACK);
+      Paint_DrawString_EN(474,225," *C", &Font24, WHITE, BLACK);
+            
+      Paint_DrawString_EN(100,250, "Humidity = ", &Font24, WHITE, BLACK);
+      Paint_DrawString_var(338,250,Humival, &Font24, WHITE, BLACK);
+      Paint_DrawString_EN(474,250," %", &Font24, WHITE, BLACK);
+
+      EPD_7IN5_Display(BlackImage);            //(image)
+      DEV_Delay_ms(10000);
+#endif
+  LPGtext =""; COtext=""; Smoketext=""; Temptext=""; Humitext="";
+}
+
+void callback(char* topic, byte * data, unsigned int length)
+{  
+  // handle message arrived {
+  Data = "";
+  Serial.print(topic);
+  Serial.print(": ");
+    for (int i = 0; i < length; i++) 
+    {
+      //Serial.print((char)data[i]);
+      Data += (char)data[i];   
+    }
+  Serial.print(Data);
+  Serial.println();
+  if(String(topic)=="thantawat/feeds/lpg")
+  {
+    LPGtext = Data;       
+  }
+   else if(String(topic)=="thantawat/feeds/co")
+  {
+    COtext = Data;       
+  }
+  else if(String(topic)=="thantawat/feeds/smoke")
+  {
+    Smoketext = Data;       
+  }
+  else if(String(topic)=="thantawat/feeds/temperature")
+  {
+    Temptext = Data;       
+  }
+  else if (String(topic)=="thantawat/feeds/humidity")
+  {
+    Humitext = Data;       
+  }  
+}
